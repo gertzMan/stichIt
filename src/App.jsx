@@ -1,3 +1,5 @@
+import './index.css'; // Import Tailwind CSS
+
 import React, { useState, useCallback } from 'react';
 import { Plus, ArrowRight, ArrowDown, Trash2, X, Image, Download } from 'lucide-react';
 
@@ -71,6 +73,7 @@ const BoxGridManagerWithPaste = () => {
       }
     }
   }, [selectedBox]);
+
 
   return (
     <div className="p-4 max-w-4xl mx-auto" onPaste={handlePaste}>
