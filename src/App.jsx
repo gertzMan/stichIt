@@ -31,17 +31,32 @@ const ImageReplacerStitcher = () => {
   const [isAddImageFocused, setIsAddImageFocused] = useState(false);
 
   const logEvent = (eventType, details, method = 'mouse') => {
-    // Temporarily disable logging
-    return;
+    const isSerializable = (value) => {
+      if (typeof value === 'object' && value !== null) {
+        try {
+          JSON.stringify(value);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+      return true;
+    };
 
-    // Original logging code (commented out)
-    // const eventLog = {
-    //   eventType,
-    //   timestamp: new Date().toISOString(),
-    //   details: JSON.parse(JSON.stringify(details)), // Ensure details are serializable
-    //   method,
-    // };
-    // console.log(JSON.stringify(eventLog));
+    const serializableDetails = Object.keys(details).reduce((acc, key) => {
+      if (isSerializable(details[key])) {
+        acc[key] = details[key];
+      }
+      return acc;
+    }, {});
+
+    const eventLog = {
+      eventType,
+      timestamp: new Date().toISOString(),
+      details: serializableDetails, // Ensure details are serializable
+      method,
+    };
+    console.log(JSON.stringify(eventLog));
   };
 
   // Function to add a new image box
@@ -385,6 +400,7 @@ const ImageReplacerStitcher = () => {
             onClick={handleAddImage} 
             isDisabled={isStitched} 
             isFocused={isAddImageFocused && images.length === 0}
+            tabIndex={0}
           />
           <ImageGrid 
             images={images} 
@@ -398,11 +414,13 @@ const ImageReplacerStitcher = () => {
             onDelete={handleDelete}
             moveImage={moveImage}
             logEvent={logEvent}
+            tabIndex={1}
           />
           <StitchButton 
             isStitched={isStitched} 
             onClick={isStitched ? handleUnstitch : handleStitch} 
             isDisabled={!isStitched && images.length < 2}
+            tabIndex={2}
           />
           <input 
             type="file" 
@@ -467,7 +485,7 @@ const KeyboardUsageGuide = () => (
 );
 
 // Component for the "Add Image" button
-const AddImageButton = ({ onClick, isDisabled, isFocused }) => (
+const AddImageButton = ({ onClick, isDisabled, isFocused, tabIndex }) => (
   <button 
     onClick={isDisabled ? null : onClick}
     className={`mb-4 px-4 py-2 rounded flex items-center ${
@@ -476,19 +494,19 @@ const AddImageButton = ({ onClick, isDisabled, isFocused }) => (
       'bg-blue-500 text-white hover:bg-blue-600'
     }`}
     disabled={isDisabled}
+    tabIndex={tabIndex}
   >
     <Plus className="mr-2" /> Add Image
   </button>
 );
 
 // Component to display the grid of image boxes
-const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, logEvent }) => (
-  <div className={`mt-4 ${isStitched ? 'flex overflow-x-auto' : 'grid grid-cols-3 gap-4'}`}>
-    {images.map((image, index) => (
+const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, logEvent, tabIndex }) => (
+  <div className={`mt-4 ${isStitched ? 'flex overflow-x-auto' : 'grid grid-cols-3 gap-4'}`} tabIndex={tabIndex}>
+    {images.length === 0 ? (
       <ImageBox 
-        key={index} 
-        index={index}
-        image={image}
+        index={0}
+        image=""
         isStitched={isStitched}
         selectedIndex={selectedIndex}
         selectedAction={selectedAction}
@@ -500,7 +518,25 @@ const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageC
         moveImage={moveImage}
         logEvent={logEvent}
       />
-    ))}
+    ) : (
+      images.map((image, index) => (
+        <ImageBox 
+          key={index} 
+          index={index}
+          image={image}
+          isStitched={isStitched}
+          selectedIndex={selectedIndex}
+          selectedAction={selectedAction}
+          onImageClick={onImageClick}
+          onFileChange={onFileChange}
+          onPasteButtonClick={onPasteButtonClick}
+          onKeepBlank={onKeepBlank}
+          onDelete={onDelete}
+          moveImage={moveImage}
+          logEvent={logEvent}
+        />
+      ))
+    )}
   </div>
 );
 
@@ -542,24 +578,11 @@ const ImageBox = ({ image, index, isStitched, selectedIndex, selectedAction, onI
       className={`relative border ${selectedIndex === index ? 'ring-2 ring-blue-500' : 'border-black'} ${isDragging ? 'opacity-50' : ''}`}
       onClick={() => onImageClick(index)}
     >
-      {image.type === 'stitched' ? (
-        <div className="flex">
-          {image.images.map((img, idx) => (
-            <img 
-              key={idx}
-              src={img || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='} 
-              alt={`Image ${idx + 1}`} 
-              className="h-40 flex-shrink-0"
-            />
-          ))}
-        </div>
-      ) : (
-        <img 
-          src={image || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='} 
-          alt={`Image ${index + 1}`} 
-          className={isStitched ? "h-40 flex-shrink-0" : "w-full h-40 object-cover rounded-lg"}
-        />
-      )}
+      <img 
+        src={image || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='} 
+        alt={`Image ${index + 1}`} 
+        className={isStitched ? "h-40 flex-shrink-0" : "w-full h-40 object-cover rounded-lg"}
+      />
       {selectedIndex === index && !isStitched && (
         <div className="absolute inset-0 bg-black bg-opacity-50 flex flex-col items-center justify-center space-y-2">
           <button 
@@ -609,11 +632,12 @@ const ImageBox = ({ image, index, isStitched, selectedIndex, selectedAction, onI
 };
 
 // Component for the "Stitch/Unstitch Images" button
-const StitchButton = ({ isStitched, onClick, isDisabled }) => (
+const StitchButton = ({ isStitched, onClick, isDisabled, tabIndex }) => (
   <button 
     onClick={isDisabled ? null : onClick}
     className={`mt-4 px-4 py-2 rounded flex items-center ${isDisabled ? 'bg-gray-400 text-gray-700 cursor-not-allowed' : isStitched ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600'}`}
     disabled={isDisabled}
+    tabIndex={tabIndex}
   >
     {isStitched ? <Scissors className="mr-2" /> : <Image className="mr-2" />}
     {isStitched ? "Unstitch Images" : "Stitch Images"}
@@ -625,6 +649,7 @@ AddImageButton.propTypes = {
   onClick: PropTypes.func.isRequired,
   isDisabled: PropTypes.bool.isRequired,
   isFocused: PropTypes.bool.isRequired,
+  tabIndex: PropTypes.number.isRequired,
 };
 
 // PropTypes for ImageGrid component
@@ -640,6 +665,7 @@ ImageGrid.propTypes = {
   onDelete: PropTypes.func.isRequired,
   moveImage: PropTypes.func.isRequired,
   logEvent: PropTypes.func.isRequired,
+  tabIndex: PropTypes.number.isRequired,
 };
 
 // PropTypes for ImageBox component
@@ -663,6 +689,7 @@ StitchButton.propTypes = {
   isStitched: PropTypes.bool.isRequired,
   onClick: PropTypes.func.isRequired,
   isDisabled: PropTypes.bool.isRequired,
+  tabIndex: PropTypes.number.isRequired,
 };
 
 export default ImageReplacerStitcher;
