@@ -1,11 +1,10 @@
 import './index.css'; // Import Tailwind CSS
 
 import React, { useState, useCallback } from 'react';
-import { Plus, ArrowRight, ArrowDown, Trash2, X, Image, Download } from 'lucide-react';
+import { Plus, ArrowRight, ArrowDown, Trash2, X, Image, Download, Clipboard } from 'lucide-react';
 
 const BoxGridManagerWithPaste = () => {
   const [grid, setGrid] = useState([[null]]); // Start with one empty box in one row
-  const [isStitched, setIsStitched] = useState(false);
   const [selectedBox, setSelectedBox] = useState(null); // {row, col}
 
   const handleAddBox = () => {
@@ -43,13 +42,20 @@ const BoxGridManagerWithPaste = () => {
     ));
   };
 
-  const handleStitch = () => {
-    setIsStitched(!isStitched);
-  };
+  const handleCopyToClipboard = () => {
+    if (!selectedBox) return;
 
-  const handleExport = () => {
-    console.log("Exporting stitched image...");
-    alert("In a real application, this would generate and download a PNG of the stitched image.");
+    const imageSrc = grid[selectedBox.row][selectedBox.col];
+    if (!imageSrc) return;
+
+    fetch(imageSrc)
+      .then(response => response.blob())
+      .then(blob => {
+        const item = new ClipboardItem({ "image/png": blob });
+        navigator.clipboard.write([item]);
+        alert("Image copied to clipboard!");
+      })
+      .catch(err => console.error("Failed to copy image: ", err));
   };
 
   const handlePaste = useCallback((e) => {
@@ -73,7 +79,6 @@ const BoxGridManagerWithPaste = () => {
       }
     }
   }, [selectedBox]);
-
 
   return (
     <div className="p-4 max-w-4xl mx-auto" onPaste={handlePaste}>
@@ -107,29 +112,20 @@ const BoxGridManagerWithPaste = () => {
             <Trash2 className="mr-2" /> Delete Row
           </button>
           <button
-            onClick={handleStitch}
+            onClick={handleCopyToClipboard}
             className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 flex items-center"
           >
-            <Image className="mr-2" /> {isStitched ? "Unstitch" : "Stitch"}
+            <Clipboard className="mr-2" /> Copy to Clipboard
           </button>
-          {isStitched && (
-            <button
-              onClick={handleExport}
-              className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 flex items-center"
-            >
-              <Download className="mr-2" /> Export PNG
-            </button>
-          )}
         </div>
       </div>
-      <div className={`space-y-4 ${isStitched ? 'flex flex-wrap gap-4' : ''}`}>
+      <div className="space-y-4">
         {grid.map((row, rowIndex) => (
-          <div key={rowIndex} className={`flex flex-wrap gap-4 ${isStitched ? 'w-full' : ''}`}>
+          <div key={rowIndex} className="flex flex-wrap gap-4">
             {row.map((box, colIndex) => (
               <div
                 key={colIndex}
                 className={`w-40 h-40 bg-gray-200 rounded-lg flex items-center justify-center cursor-pointer
-                  ${isStitched ? 'w-1/3 sm:w-1/4 md:w-1/5 lg:w-1/6' : ''}
                   ${selectedBox && selectedBox.row === rowIndex && selectedBox.col === colIndex ? 'ring-2 ring-blue-500' : ''}
                 `}
                 onClick={() => handleBoxClick(rowIndex, colIndex)}
