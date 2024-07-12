@@ -31,10 +31,20 @@ const ImageReplacerStitcher = () => {
   const [isAddImageFocused, setIsAddImageFocused] = useState(false);
 
   const logEvent = (eventType, details, method = 'mouse') => {
+    const seen = new WeakSet();
+
     const isSerializable = (value) => {
       if (typeof value === 'object' && value !== null) {
         try {
-          JSON.stringify(value);
+          JSON.stringify(value, (key, val) => {
+            if (typeof val === 'object' && val !== null) {
+              if (seen.has(val)) {
+                return '[Circular]';
+              }
+              seen.add(val);
+            }
+            return val;
+          });
           return true;
         } catch (e) {
           return false;
@@ -46,6 +56,8 @@ const ImageReplacerStitcher = () => {
     const serializableDetails = Object.keys(details).reduce((acc, key) => {
       if (isSerializable(details[key])) {
         acc[key] = details[key];
+      } else {
+        acc[key] = '[Non-serializable]';
       }
       return acc;
     }, {});
@@ -61,7 +73,7 @@ const ImageReplacerStitcher = () => {
 
   // Function to add a new image box
   const handleAddImage = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Add Image' }, method);
+    // logEvent('ButtonPressed', { buttonText: 'Add Image' }, method);
     const newImage = '';
     setImages(prevImages => [...prevImages, newImage]);
     setIsAddImageFocused(false);
