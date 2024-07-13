@@ -108,6 +108,11 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selec
     return <div>Invalid canvas size</div>;
   }
 
+  // Calculate the scaling factor to fit images within 60% of the canvas width
+  const totalWidth = stitchedImages.reduce((sum, image) => sum + image.width, 0);
+  const actualCanvasWidth = totalWidth * 1.4;
+  const scaleFactor = canvasSize.width / actualCanvasWidth;
+
   return (
     <div className="overflow-auto" style={{ maxWidth: '100%', maxHeight: '80vh' }}>
       <div 
@@ -120,11 +125,13 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selec
             data-index={index}
             style={{
               position: 'absolute',
-              left: image.x,
-              top: image.y,
+              left: image.x * scaleFactor,
+              top: image.y * scaleFactor,
               cursor: draggingState && draggingState.index === index ? 'grabbing' : 'grab',
               userSelect: 'none',
               zIndex: zIndexOrder.length ? zIndexOrder.length - zIndexOrder.indexOf(image.src) : 1,
+              transform: `scale(${scaleFactor})`,
+              transformOrigin: 'top left',
             }}
             onMouseDown={(e) => handleMouseDown(index, e)}
           >
@@ -255,10 +262,22 @@ const ImageReplacerStitcher = () => {
     const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
     const maxHeight = Math.max(...images.map(image => image.height || 225));
 
-    // Set the canvas size to the total width and maximum height
+    // Calculate the actual canvas width (total width of all images + 40%)
+    const actualCanvasWidth = totalWidth * 1.4;
+
+    // Get the available viewport width
+    const viewportWidth = window.innerWidth;
+
+    // Set the displayed canvas width to the viewport width
+    const displayedCanvasWidth = viewportWidth;
+
+    // Calculate the scaling factor to fit the actual canvas width into the displayed canvas width
+    const scaleFactor = displayedCanvasWidth / actualCanvasWidth;
+
+    // Set the canvas size
     setCanvasSize({ 
-      width: totalWidth,
-      height: maxHeight
+      width: displayedCanvasWidth,
+      height: maxHeight * scaleFactor // Scale the height proportionally
     });
 
     // Prepare stitched images data
@@ -336,23 +355,14 @@ const ImageReplacerStitcher = () => {
       reader.onload = async (e) => {
         try {
           const img = await loadImage(e.target.result);
-          const aspectRatio = img.width / img.height;
-          let width, height;
-          if (aspectRatio > 4/3) {
-            width = 300;
-            height = 300 / aspectRatio;
-          } else {
-            height = 225;
-            width = 225 * aspectRatio;
-          }
           setImages(prevImages => {
             const newImages = [...prevImages];
             newImages[selectedIndex] = {
               src: e.target.result,
               originalWidth: img.width,
               originalHeight: img.height,
-              width,
-              height,
+              width: img.width, // Use original width
+              height: img.height, // Use original height
               x: newImages[selectedIndex].x,
               y: newImages[selectedIndex].y,
             };
@@ -368,6 +378,8 @@ const ImageReplacerStitcher = () => {
 
   // Function to handle paste button click
   const handlePasteButtonClick = (method = 'mouse') => {
+    if (selectedIndex === null || selectedIndex >= images.length) return;
+
     navigator.clipboard.read().then((items) => {
       for (let item of items) {
         if (item.types.includes('image/png')) {
@@ -382,8 +394,8 @@ const ImageReplacerStitcher = () => {
                     src: e.target.result,
                     originalWidth: img.width,
                     originalHeight: img.height,
-                    width: newImages[selectedIndex].width,
-                    height: newImages[selectedIndex].height,
+                    width: img.width, // Use original width
+                    height: img.height, // Use original height
                     x: newImages[selectedIndex].x,
                     y: newImages[selectedIndex].y,
                   };
