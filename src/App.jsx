@@ -9,8 +9,6 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
  * @property {'stitched'} type
  * @property {string} url
  * @property {string[]} originalImages
- * @property {number} rows
- * @property {number} columns
  * @property {number} width
  * @property {number} height
  */
@@ -44,12 +42,6 @@ const ImageReplacerStitcher = () => {
   // Add a new state to track if the "Add Image" button is focused
   const [isAddImageFocused, setIsAddImageFocused] = useState(false);
 
-  // New state to track the number of rows
-  const [rows, setRows] = useState(1);
-
-  // New state to track the number of columns
-  const [columns, setColumns] = useState(1);
-
   // State to manage context menu visibility and position
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
 
@@ -63,28 +55,11 @@ const ImageReplacerStitcher = () => {
     console.log(eventLog);
   };
 
-  // Function to add a new column
-  const handleAddColumn = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Add Column' }, method);
-    setColumns(prevColumns => {
-      const newColumns = prevColumns + 1;
-      setImages(prevImages => {
-        const newImages = [];
-        for (let i = 0; i < rows; i++) {
-          newImages.push(...prevImages.slice(i * prevColumns, (i + 1) * prevColumns), '');
-        }
-        return newImages;
-      });
-      return newColumns;
-    });
+  // Function to add a new image
+  const handleAddImage = (method = 'mouse') => {
+    logEvent('ButtonPressed', { buttonText: 'Add Image' }, method);
+    setImages(prevImages => [...prevImages, '']);
     setIsAddImageFocused(false);
-  };
-
-  // Function to add a new row
-  const handleAddRow = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Add Row' }, method);
-    setRows(prevRows => prevRows + 1);
-    setImages(prevImages => [...prevImages, ...Array(columns).fill('')]);
   };
 
   // Function to stitch images together into a single image
@@ -95,31 +70,17 @@ const ImageReplacerStitcher = () => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    console.log(`Stitching started. Rows: ${rows}, Columns: ${columns}`);
+    console.log(`Stitching started. Images: ${images.length}`);
 
-    // Calculate the dimensions of each row and column
-    const rowHeights = Array(rows).fill(0);
-    const columnWidths = Array(columns).fill(0);
-
-    images.forEach((image, index) => {
-      const row = Math.floor(index / columns);
-      const col = index % columns;
-      if (image && image.height) {
-        rowHeights[row] = Math.max(rowHeights[row], image.height);
-      }
-      if (image && image.width) {
-        columnWidths[col] = Math.max(columnWidths[col], image.width);
-      }
-    });
-
-    const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
-    const totalHeight = rowHeights.reduce((sum, height) => sum + height, 0);
+    // Calculate the total width and height
+    const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
+    const maxHeight = Math.max(...images.map(image => image.height || 225));
 
     // Set canvas dimensions
     canvas.width = totalWidth;
-    canvas.height = totalHeight;
+    canvas.height = maxHeight;
 
-    console.log(`Canvas created with dimensions: ${totalWidth}x${totalHeight}`);
+    console.log(`Canvas created with dimensions: ${totalWidth}x${maxHeight}`);
 
     // Function to draw an image on the canvas
     const drawImage = (img, x, y, width, height) => {
@@ -139,25 +100,25 @@ const ImageReplacerStitcher = () => {
     // Function to stitch images together
     const stitchImages = async () => {
       try {
-        let yOffset = 0;
-        for (let i = 0; i < rows; i++) {
-          let xOffset = 0;
-          for (let j = 0; j < columns; j++) {
-            const index = i * columns + j;
-            const image = images[index];
-            console.log(`Processing image at index ${index}:`, image);
+        let xOffset = 0;
+        for (let i = 0; i < images.length; i++) {
+          const image = images[i];
+          console.log(`Processing image at index ${i}:`, image);
 
-            if (image && image.src) {
-              const img = new Image();
-              img.src = image.src;
-              await drawImage(img, xOffset, yOffset, image.width, image.height);
-            } else {
-              console.log(`No image at index ${index}, leaving blank`);
-            }
+          if (image && image.src) {
+            const img = new Image();
+            img.src = image.src;
 
-            xOffset += columnWidths[j];
+            // Adjust the image dimensions to fit the canvas
+            const aspectRatio = image.width / image.height;
+            const newWidth = image.width;
+            const newHeight = newWidth / aspectRatio;
+
+            await drawImage(img, xOffset, 0, newWidth, newHeight);
+          } else {
+            console.log(`No image at index ${i}, leaving blank`);
           }
-          yOffset += rowHeights[i];
+          xOffset += image.width || 300;
         }
 
         const stitchedImageUrl = canvas.toDataURL();
@@ -167,8 +128,6 @@ const ImageReplacerStitcher = () => {
           type: 'stitched',
           url: stitchedImageUrl,
           originalImages: [...images],
-          rows: rows,
-          columns: columns,
           width: canvas.width,
           height: canvas.height
         };
@@ -196,8 +155,6 @@ const ImageReplacerStitcher = () => {
     logEvent('ButtonPressed', { buttonText: 'Unstitch', method });
     if (images[0] && images[0].type === 'stitched') {
       setImages(images[0].originalImages);
-      setRows(images[0].rows);
-      setColumns(images[0].columns);
     } else {
       setImages(originalImages);
     }
@@ -355,7 +312,7 @@ const ImageReplacerStitcher = () => {
     if (images.length === 0) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        handleAddColumn('keyboard');
+        handleAddImage('keyboard');
       }
       return;
     }
@@ -408,7 +365,7 @@ const ImageReplacerStitcher = () => {
             }
             setSelectedAction(null);
           } else if (selectedIndex === images.length - 1 && !isStitched) {
-            handleAddColumn('keyboard');
+            handleAddImage('keyboard');
           }
         }
         break;
@@ -452,14 +409,14 @@ const ImageReplacerStitcher = () => {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
           e.preventDefault();
           if (!isStitched) {
-            handleAddColumn('keyboard');
+            handleAddImage('keyboard');
           }
         }
         break;
       default:
         break;
     }
-  }, [selectedIndex, selectedAction, images, handleDelete, handlePasteButtonClick, handleKeepBlank, isStitched, handleStitch, handleUnstitch, handleAddColumn]);
+  }, [selectedIndex, selectedAction, images, handleDelete, handlePasteButtonClick, handleKeepBlank, isStitched, handleStitch, handleUnstitch, handleAddImage]);
 
   // Add event listener for keydown events
   useEffect(() => {
@@ -518,24 +475,8 @@ const ImageReplacerStitcher = () => {
 
   // Method to calculate the dimensions of the grid
   const calculateGridDimensions = () => {
-    let totalWidth = 0;
-    let maxHeight = 0;
-    for (let i = 0; i < rows; i++) {
-      let rowWidth = 0;
-      let rowHeight = 0;
-      for (let j = 0; j < columns; j++) {
-        const image = images[i * columns + j];
-        if (image && image.width) {
-          rowWidth += image.width;
-          rowHeight = Math.max(rowHeight, image.height);
-        } else {
-          rowWidth += 300;
-          rowHeight = Math.max(rowHeight, 225);
-        }
-      }
-      totalWidth = Math.max(totalWidth, rowWidth);
-      maxHeight += rowHeight;
-    }
+    const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
+    const maxHeight = Math.max(...images.map(image => image.height || 225));
     return `${Math.round(totalWidth)}x${Math.round(maxHeight)}`;
   };
 
@@ -554,16 +495,11 @@ const ImageReplacerStitcher = () => {
       <div className="flex flex-col min-h-screen">
         <div className="flex-grow p-4 max-w-2xl mx-auto" onPaste={handlePaste}>
           <div className="flex justify-between mb-4">
-            <AddColumnButton 
-              onClick={handleAddColumn} 
+            <AddImageButton 
+              onClick={handleAddImage} 
               isDisabled={isStitched} 
               isFocused={isAddImageFocused && images.length === 0}
               tabIndex={0}
-            />
-            <AddRowButton
-              onClick={handleAddRow}
-              isDisabled={isStitched}
-              tabIndex={3}
             />
           </div>
           {isStitched ? (
@@ -572,9 +508,7 @@ const ImageReplacerStitcher = () => {
             </div>
           ) : (
             <ImageGrid 
-              images={images} 
-              rows={rows}
-              columns={columns}
+              images={images}
               isStitched={isStitched} 
               selectedIndex={selectedIndex} 
               selectedAction={selectedAction}
@@ -606,7 +540,7 @@ const ImageReplacerStitcher = () => {
           <KeyboardUsageGuide />
           <div className="mt-4">
             <h2 className="text-lg font-bold mb-2">Image Grid Data</h2>
-            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${columns}, 50px)`, gridAutoRows: '50px' }}>
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${images.length}, 50px)`, gridAutoRows: '50px' }}>
               {images.map((image, index) => (
                 <div 
                   key={index} 
@@ -697,8 +631,8 @@ const KeyboardUsageGuide = () => (
   </div>
 );
 
-// Component for the "Add Column" button
-const AddColumnButton = ({ onClick, isDisabled, isFocused, tabIndex }) => (
+// Component for the "Add Image" button
+const AddImageButton = ({ onClick, isDisabled, isFocused, tabIndex }) => (
   <button 
     onClick={isDisabled ? null : onClick}
     className={`mb-4 px-4 py-2 rounded flex items-center ${
@@ -709,46 +643,22 @@ const AddColumnButton = ({ onClick, isDisabled, isFocused, tabIndex }) => (
     disabled={isDisabled}
     tabIndex={tabIndex}
   >
-    <Plus className="mr-2" /> Add Column
-  </button>
-);
-
-// New component for the "Add Row" button
-const AddRowButton = ({ onClick, isDisabled, tabIndex }) => (
-  <button 
-    onClick={isDisabled ? null : onClick}
-    className={`px-4 py-2 rounded flex items-center ${
-      isDisabled ? 'bg-gray-400 text-gray-700 cursor-not-allowed' : 
-      'bg-purple-500 text-white hover:bg-purple-600'
-    }`}
-    disabled={isDisabled}
-    tabIndex={tabIndex}
-  >
-    <Plus className="mr-2" /> Add Row
+    <Plus className="mr-2" /> Add Image
   </button>
 );
 
 // Component to display the grid of image boxes
-const ImageGrid = ({ images, rows, columns, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, logEvent, tabIndex, onContextMenu, handleDownload, handleCopyToClipboard }) => {
-  // Calculate the total number of boxes needed to form a complete rectangle
-  const totalBoxes = rows * columns;
-  
-  // Create an array of the correct length, filling in with empty boxes as needed
-  const gridItems = [...images];
-  while (gridItems.length < totalBoxes) {
-    gridItems.push('');
-  }
-
+const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, logEvent, tabIndex, onContextMenu, handleDownload, handleCopyToClipboard }) => {
   return (
     <div 
       className="grid gap-4"
       style={{ 
-        gridTemplateColumns: `repeat(${columns}, 300px)`,
+        gridTemplateColumns: `repeat(${images.length}, 300px)`,
         gridAutoRows: '225px'
       }}
       tabIndex={tabIndex}
     >
-      {gridItems.map((image, index) => (
+      {images.map((image, index) => (
         <ImageBox
           key={index}
           image={image}
@@ -889,26 +799,17 @@ const StitchButton = ({ isStitched, onClick, isDisabled, tabIndex }) => (
   </button>
 );
 
-// PropTypes for AddColumnButton component
-AddColumnButton.propTypes = {
+// PropTypes for AddImageButton component
+AddImageButton.propTypes = {
   onClick: PropTypes.func.isRequired,
   isDisabled: PropTypes.bool.isRequired,
   isFocused: PropTypes.bool.isRequired,
   tabIndex: PropTypes.number.isRequired,
 };
 
-// PropTypes for AddRowButton component
-AddRowButton.propTypes = {
-  onClick: PropTypes.func.isRequired,
-  isDisabled: PropTypes.bool.isRequired,
-  tabIndex: PropTypes.number.isRequired,
-};
-
 // PropTypes for ImageGrid component
 ImageGrid.propTypes = {
   images: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.object])).isRequired,
-  rows: PropTypes.number.isRequired,
-  columns: PropTypes.number.isRequired,
   isStitched: PropTypes.bool.isRequired,
   selectedIndex: PropTypes.number,
   selectedAction: PropTypes.string,
