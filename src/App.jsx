@@ -23,65 +23,82 @@ const ItemType = {
 };
 
 // Define StitchedImageEditor component at the top of the file
-const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag }) => {
-  console.log("Rendering StitchedImageEditor");
-  console.log("stitchedImages:", stitchedImages);
-  console.log("canvasSize:", canvasSize);
-
+const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selectedIndex, zIndexOrder, setZIndexOrder }) => {
   const [draggingState, setDraggingState] = useState(null);
-  const longPressDelay = 300; // milliseconds
+  const longPressTimeoutRef = useRef(null);
+  const longPressDelay = 100; // milliseconds
 
   const handleMouseDown = useCallback((index, e) => {
-    const startTime = new Date().getTime();
     const startX = e.clientX;
     const startY = e.clientY;
+    const originalX = stitchedImages[index].x;
+    const originalY = stitchedImages[index].y;
 
-    const timer = setTimeout(() => {
+    const startTime = Date.now();
+
+    const handleMouseMove = (moveEvent) => {
+      const currentTime = Date.now();
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+
+      if (currentTime - startTime >= longPressDelay) {
+        setDraggingState({
+          index,
+          startX,
+          startY,
+          originalX,
+          originalY,
+        });
+        onDrag(index, null, {
+          x: originalX + dx,
+          y: originalY + dy,
+        });
+      }
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      handleDragEnd(index); // Update z-index order on drag end
+      setDraggingState(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    longPressTimeoutRef.current = setTimeout(() => {
       setDraggingState({
         index,
         startX,
         startY,
-        originalX: stitchedImages[index].x,
-        originalY: stitchedImages[index].y,
+        originalX,
+        originalY,
       });
     }, longPressDelay);
 
-    const handleMouseUp = () => {
-      clearTimeout(timer);
-      window.removeEventListener('mouseup', handleMouseUp);
+    return () => {
+      if (longPressTimeoutRef.current) {
+        clearTimeout(longPressTimeoutRef.current);
+      }
     };
+  }, [stitchedImages, onDrag]);
 
-    window.addEventListener('mouseup', handleMouseUp);
-  }, [stitchedImages]);
-
-  const handleMouseMove = useCallback((e) => {
-    if (draggingState) {
-      const dx = e.clientX - draggingState.startX;
-      const dy = e.clientY - draggingState.startY;
-      onDrag(draggingState.index, null, {
-        x: draggingState.originalX + dx,
-        y: draggingState.originalY + dy,
-      });
-    }
-  }, [draggingState, onDrag]);
-
-  const handleMouseUp = useCallback(() => {
-    setDraggingState(null);
-  }, []);
+  const handleDragEnd = (index) => {
+    setZIndexOrder((prevOrder) => {
+      const newOrder = [...prevOrder];
+      const [movedImage] = newOrder.splice(index, 1);
+      newOrder.push(movedImage);
+      return newOrder;
+    });
+  };
 
   useEffect(() => {
-    if (draggingState) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    } else {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    }
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      if (longPressTimeoutRef.current) {
+        clearTimeout(longPressTimeoutRef.current);
+      }
     };
-  }, [draggingState, handleMouseMove, handleMouseUp]);
+  }, []);
 
   if (!stitchedImages || stitchedImages.length === 0) {
     return <div>No stitched images to display</div>;
@@ -100,12 +117,14 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag }) => {
         {stitchedImages.map((image, index) => (
           <div
             key={index}
+            data-index={index}
             style={{
               position: 'absolute',
               left: image.x,
               top: image.y,
               cursor: draggingState && draggingState.index === index ? 'grabbing' : 'grab',
               userSelect: 'none',
+              zIndex: zIndexOrder.length ? zIndexOrder.length - zIndexOrder.indexOf(image.src) : 1,
             }}
             onMouseDown={(e) => handleMouseDown(index, e)}
           >
@@ -141,6 +160,18 @@ StitchedImageEditor.propTypes = {
     height: PropTypes.number.isRequired,
   }).isRequired,
   onDrag: PropTypes.func.isRequired,
+  images: PropTypes.arrayOf(
+    PropTypes.shape({
+      src: PropTypes.string.isRequired,
+      width: PropTypes.number.isRequired,
+      height: PropTypes.number.isRequired,
+      x: PropTypes.number.isRequired,
+      y: PropTypes.number.isRequired,
+    })
+  ).isRequired,
+  selectedIndex: PropTypes.number,
+  zIndexOrder: PropTypes.arrayOf(PropTypes.string).isRequired,
+  setZIndexOrder: PropTypes.func.isRequired,
 };
 
 class ErrorBoundary extends React.Component {
@@ -167,10 +198,16 @@ class ErrorBoundary extends React.Component {
 }
 
 const ImageReplacerStitcher = () => {
-  console.log("Rendering ImageReplacerStitcher");
-  
   // State to hold the list of images, initialized with one empty image box
-  const [images, setImages] = useState(/** @type {ImageType[]} */(['']));
+  const [images, setImages] = useState([
+    {
+      src: '',
+      width: 300,
+      height: 225,
+      x: 0,
+      y: 0,
+    },
+  ]);
   // State to track if images are stitched together
   const [isStitched, setIsStitched] = useState(false);
   // State to track the currently selected image index
@@ -194,83 +231,68 @@ const ImageReplacerStitcher = () => {
   const [stitchedImages, setStitchedImages] = useState([]);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
-  const logEvent = (eventType, details, method = 'mouse') => {
-    const eventLog = {
-      eventType,
-      timestamp: new Date().toISOString(),
-      details, // No need to ensure details are serializable
-      method,
-    };
-    console.log(eventLog);
-  };
+  // New state to track z-index order
+  const [zIndexOrder, setZIndexOrder] = useState([]);
 
   // Function to add a new image
   const handleAddImage = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Add Image' }, method);
-    setImages(prevImages => [...prevImages, '']);
+    setImages(prevImages => [
+      ...prevImages,
+      {
+        src: '',
+        width: 300,
+        height: 225,
+        x: 0,
+        y: 0,
+      },
+    ]);
     setIsAddImageFocused(false);
   };
 
   // Function to stitch images together into a single image
   const handleStitch = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Stitch', method });
-
     // Calculate the total width and maximum height of all images
     const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
     const maxHeight = Math.max(...images.map(image => image.height || 225));
 
-    // Calculate the maximum width that doesn't require scrolling
-    const maxScrollWidth = window.innerWidth - 40; // Subtracting 40px for some padding
-
-    // Determine the canvas width (minimum of totalWidth and maxScrollWidth)
-    const canvasWidth = Math.min(totalWidth, maxScrollWidth);
-
-    // Calculate the scale factor
-    const scaleFactor = canvasWidth / totalWidth;
-
+    // Set the canvas size to the total width and maximum height
     setCanvasSize({ 
-      width: Math.round(canvasWidth),
-      height: Math.round(maxHeight * scaleFactor * 2) // Double the height for more vertical space
+      width: totalWidth,
+      height: maxHeight
     });
 
     // Prepare stitched images data
     let xOffset = 0;
     const stitchedImagesData = images.map((image, index) => {
-      const scaledWidth = Math.round((image.width || 300) * scaleFactor);
-      const scaledHeight = Math.round((image.height || 225) * scaleFactor);
       const imageData = {
         src: image.src,
-        width: scaledWidth,
-        height: scaledHeight,
+        width: image.width,
+        height: image.height,
         x: xOffset,
         y: 0, // Start at the top
       };
-      xOffset += scaledWidth;
+      xOffset += image.width;
       return imageData;
     });
 
     setStitchedImages(stitchedImagesData);
     setIsStitched(true);
-    logEvent('ImagesStitched', { message: 'Images stitched', images, method });
+    setZIndexOrder(images.map(img => img.src)); // Initialize zIndexOrder
   };
 
   // Function to unstitch images
   const handleUnstitch = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Unstitch', method });
     setStitchedImages([]);
     setIsStitched(false);
-    logEvent('ImagesUnstitched', { originalImages: images, method });
   };
 
   // Function to handle image box click
   const handleImageClick = (index) => {
-    logEvent('ImageClick', { index }, 'mouse');
     setSelectedIndex(index);
   };
 
   // Function to handle paste event
   const handlePaste = useCallback((e) => {
-    logEvent('Paste', {}, 'mouse');
     e.preventDefault();
     if (selectedIndex === null) return;
 
@@ -282,10 +304,17 @@ const ImageReplacerStitcher = () => {
         reader.onload = (e) => {
           const img = new window.Image();
           img.onload = () => {
-            logEvent('ImageUploaded', { source: 'clipboard', size: blob.size, width: img.width, height: img.height, index: selectedIndex, isInplace: images[selectedIndex] !== '' }, method);
             setImages(prevImages => {
               const newImages = [...prevImages];
-              newImages[selectedIndex] = e.target.result;
+              newImages[selectedIndex] = {
+                src: e.target.result,
+                originalWidth: img.width,
+                originalHeight: img.height,
+                width: newImages[selectedIndex].width,
+                height: newImages[selectedIndex].height,
+                x: newImages[selectedIndex].x,
+                y: newImages[selectedIndex].y,
+              };
               return newImages;
             });
           };
@@ -299,7 +328,6 @@ const ImageReplacerStitcher = () => {
 
   // Function to handle file input change
   const handleFileChange = async (e, method = 'mouse') => {
-    logEvent('FileChange', { index: selectedIndex }, method);
     if (selectedIndex === null) return;
 
     const file = e.target.files[0];
@@ -317,7 +345,6 @@ const ImageReplacerStitcher = () => {
             height = 225;
             width = 225 * aspectRatio;
           }
-          logEvent('ImageUploaded', { source: 'upload', size: file.size, width: img.width, height: img.height, index: selectedIndex, isInplace: images[selectedIndex] !== '' }, method);
           setImages(prevImages => {
             const newImages = [...prevImages];
             newImages[selectedIndex] = {
@@ -325,7 +352,9 @@ const ImageReplacerStitcher = () => {
               originalWidth: img.width,
               originalHeight: img.height,
               width,
-              height
+              height,
+              x: newImages[selectedIndex].x,
+              y: newImages[selectedIndex].y,
             };
             return newImages;
           });
@@ -339,7 +368,6 @@ const ImageReplacerStitcher = () => {
 
   // Function to handle paste button click
   const handlePasteButtonClick = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Paste' }, method);
     navigator.clipboard.read().then((items) => {
       for (let item of items) {
         if (item.types.includes('image/png')) {
@@ -348,10 +376,17 @@ const ImageReplacerStitcher = () => {
             reader.onload = (e) => {
               const img = new window.Image();
               img.onload = () => {
-                logEvent('ImageUploaded', { source: 'clipboard', size: blob.size, width: img.width, height: img.height, index: selectedIndex, isInplace: images[selectedIndex] !== '' }, method);
                 setImages(prevImages => {
                   const newImages = [...prevImages];
-                  newImages[selectedIndex] = e.target.result;
+                  newImages[selectedIndex] = {
+                    src: e.target.result,
+                    originalWidth: img.width,
+                    originalHeight: img.height,
+                    width: newImages[selectedIndex].width,
+                    height: newImages[selectedIndex].height,
+                    x: newImages[selectedIndex].x,
+                    y: newImages[selectedIndex].y,
+                  };
                   return newImages;
                 });
               };
@@ -366,12 +401,16 @@ const ImageReplacerStitcher = () => {
 
   // Function to keep the selected image box blank
   const handleKeepBlank = (method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Blank' }, method);
     if (selectedIndex !== null) {
-      logEvent('ImageUploaded', { source: 'blank', size: 0, width: 0, height: 0, index: selectedIndex, isInplace: images[selectedIndex] !== '' }, method);
       setImages(prevImages => {
         const newImages = [...prevImages];
-        newImages[selectedIndex] = '';
+        newImages[selectedIndex] = {
+          src: '',
+          width: newImages[selectedIndex].width,
+          height: newImages[selectedIndex].height,
+          x: newImages[selectedIndex].x,
+          y: newImages[selectedIndex].y,
+        };
         return newImages;
       });
     }
@@ -379,8 +418,6 @@ const ImageReplacerStitcher = () => {
 
   // Function to delete an image box
   const handleDelete = (index, method = 'mouse') => {
-    logEvent('ButtonPressed', { buttonText: 'Delete' }, method);
-    logEvent('ImageUploaded', { source: 'delete', size: 0, width: 0, height: 0, index, isInplace: false }, method);
     setImages(prevImages => {
       const newImages = prevImages.filter((_, i) => i !== index);
       if (newImages.length === 0) {
@@ -390,14 +427,17 @@ const ImageReplacerStitcher = () => {
     });
   };
 
-  // Function to move an image box
+  // Function to move an image box and update z-index
   const moveImage = (dragIndex, hoverIndex) => {
-    logEvent('MoveImage', { dragIndex, hoverIndex }, 'mouse');
     const dragImage = images[dragIndex];
     const newImages = [...images];
     newImages.splice(dragIndex, 1);
     newImages.splice(hoverIndex, 0, dragImage);
     setImages(newImages);
+    
+    // Update z-index order
+    const newZIndexOrder = newImages.map(img => img.src);
+    setZIndexOrder(newZIndexOrder);
   };
 
   // Effect to reset selected index when images change
@@ -454,7 +494,6 @@ const ImageReplacerStitcher = () => {
                 break;
               case 'load':
                 fileInputRef.current.click();
-                logEvent('ButtonPressed', { buttonText: 'Upload' }, 'keyboard');
                 break;
               case 'blank':
                 handleKeepBlank('keyboard');
@@ -488,11 +527,9 @@ const ImageReplacerStitcher = () => {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
           if (selectedIndex !== null) {
             fileInputRef.current.click();
-            logEvent('ButtonPressed', { buttonText: 'Upload' }, 'keyboard');
           } else if (images.length > 0) {
             setSelectedIndex(0);
             fileInputRef.current.click();
-            logEvent('ButtonPressed', { buttonText: 'Upload' }, 'keyboard');
           }
         }
         break;
@@ -537,7 +574,6 @@ const ImageReplacerStitcher = () => {
       link.href = images[0].url;
       link.download = 'stitched_image.png';
       link.click();
-      logEvent('DownloadImage', { message: 'Image downloaded' });
       setContextMenu({ visible: false, x: 0, y: 0 });
     }
   };
@@ -549,7 +585,6 @@ const ImageReplacerStitcher = () => {
         .then(blob => {
           const item = new ClipboardItem({ 'image/png': blob });
           navigator.clipboard.write([item]).then(() => {
-            logEvent('CopyToClipboard', { message: 'Image copied to clipboard' });
             setContextMenu({ visible: false, x: 0, y: 0 });
           }).catch(err => {
             console.error('Failed to copy: ', err);
@@ -593,36 +628,87 @@ const ImageReplacerStitcher = () => {
   // Add a function to handle image dragging
   const handleDrag = (index, e, data) => {
     const newStitchedImages = [...stitchedImages];
+    const image = newStitchedImages[index];
+    
+    // Calculate boundaries
+    const maxX = canvasSize.width - image.width;
+    const maxY = canvasSize.height - image.height;
+
+    // Constrain x and y within the canvas
+    const newX = Math.max(0, Math.min(data.x, maxX));
+    const newY = Math.max(0, Math.min(data.y, maxY));
+
     newStitchedImages[index] = {
-      ...newStitchedImages[index],
-      x: data.x,
-      y: data.y,
+      ...image,
+      x: newX,
+      y: newY,
+      width: image.width,
+      height: image.height,
     };
+
     setStitchedImages(newStitchedImages);
   };
 
-  console.log("isStitched:", isStitched);
-  console.log("stitchedImages:", stitchedImages);
-  console.log("canvasSize:", canvasSize);
+  // Add a condition to disable the "Add Image" button if there's already an empty box in the grid
+  const isAddImageDisabled = images.some(image => image.src === '');
+
+  // Define the handleReset function to reset the app state by calling the initialize function
+  const handleReset = () => {
+    initialize();
+  };
+
+  // Function to initialize or reset the app state
+  const initialize = () => {
+    setImages([
+      {
+        src: '',
+        width: 300,
+        height: 225,
+        x: 0,
+        y: 0,
+      },
+    ]);
+    setIsStitched(false);
+    setSelectedIndex(null);
+    setOriginalImages([]);
+    setStitchedImageUrl(null);
+    setSelectedAction(null);
+    setStitchedImages([]);
+    setCanvasSize({ width: 0, height: 0 });
+    setIsAddImageFocused(false);
+    setContextMenu({ visible: false, x: 0, y: 0 });
+    setZIndexOrder([]);
+  };
+
+  // Call the initialize function at the start of the component
+  useEffect(() => {
+    initialize();
+  }, []);
 
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col min-h-screen">
         <div className="flex-grow p-4 max-w-2xl mx-auto" onPaste={handlePaste}>
-          {console.log("Rendering main content")}
           <div className="flex justify-between mb-4">
             <AddImageButton 
               onClick={handleAddImage} 
-              isDisabled={isStitched} 
+              isDisabled={isStitched || isAddImageDisabled} 
               isFocused={isAddImageFocused && images.length === 0}
               tabIndex={0}
             />
+            <div className="absolute top-4 right-4">
+              <button onClick={handleReset} className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">Reset</button>
+            </div>
           </div>
           {isStitched ? (
             <StitchedImageEditor
               stitchedImages={stitchedImages}
               canvasSize={canvasSize}
               onDrag={handleDrag}
+              images={images}
+              selectedIndex={selectedIndex}
+              zIndexOrder={zIndexOrder}
+              setZIndexOrder={setZIndexOrder}
             />
           ) : (
             <ImageGrid 
@@ -636,7 +722,6 @@ const ImageReplacerStitcher = () => {
               onKeepBlank={handleKeepBlank}
               onDelete={handleDelete}
               moveImage={moveImage}
-              logEvent={logEvent}
               tabIndex={1}
               onContextMenu={handleContextMenu}
               handleDownload={handleDownload}
@@ -662,20 +747,18 @@ const ImageReplacerStitcher = () => {
               {images.map((image, index) => (
                 <div 
                   key={index} 
-                  className={`relative border border-black flex items-center justify-center text-xs p-1 ${typeof image === 'string' && image !== '' ? 'bg-blue-200' : ''}`}
+                  className={`relative border border-black flex items-center justify-center text-xs p-1 ${image.src === '' ? 'bg-blue-200' : ''}`}
                   style={{ fontSize: '10px' }}
                 >
-                  <div className="absolute inset-0 flex items-center justify-center text-center break-words">
-                    {image === '' ? 'Empty' : typeof image === 'string' ? '' : 'Blank'}
-                    {typeof image === 'string' && image !== '' && (
-                      <div>
-                        <img src={image} alt={`Image ${index + 1}`} onLoad={(e) => {
-                          const img = e.target;
-                          img.parentElement.innerHTML = `${img.naturalWidth}x${img.naturalHeight}`;
-                        }} style={{ display: 'none' }} />
-                      </div>
-                    )}
-                  </div>
+                  <div ref={parentRef => {
+                    if (parentRef) {
+                      const img = new Image();
+                      img.src = image.src;
+                      img.onload = () => {
+                        parentRef.innerHTML = `${img.naturalWidth}x${img.naturalHeight}`;
+                      };
+                    }
+                  }} />
                 </div>
               ))}
             </div>
@@ -766,7 +849,7 @@ const AddImageButton = ({ onClick, isDisabled, isFocused, tabIndex }) => (
 );
 
 // Component to display the grid of image boxes
-const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, logEvent, tabIndex, onContextMenu, handleDownload, handleCopyToClipboard }) => {
+const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, tabIndex, onContextMenu, handleDownload, handleCopyToClipboard }) => {
   return (
     <div 
       className="grid gap-4"
@@ -790,7 +873,6 @@ const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageC
           onKeepBlank={onKeepBlank}
           onDelete={onDelete}
           moveImage={moveImage}
-          logEvent={logEvent}
           onContextMenu={onContextMenu}
           handleDownload={handleDownload}
           handleCopyToClipboard={handleCopyToClipboard}
@@ -801,7 +883,7 @@ const ImageGrid = ({ images, isStitched, selectedIndex, selectedAction, onImageC
 };
 
 // Component to display an individual image box
-const ImageBox = ({ image, index, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage, logEvent }) => {
+const ImageBox = ({ image, index, isStitched, selectedIndex, selectedAction, onImageClick, onFileChange, onPasteButtonClick, onKeepBlank, onDelete, moveImage }) => {
   const ref = React.useRef(null);
 
   // Setup drop target for drag-and-drop
@@ -835,12 +917,12 @@ const ImageBox = ({ image, index, isStitched, selectedIndex, selectedAction, onI
   return (
     <div 
       ref={ref}
-      className={`relative border ${selectedIndex === index ? 'ring-2 ring-blue-500' : image === '' ? 'border-dotted border-black' : 'border-black'} ${isDragging ? 'opacity-50' : ''}`}
+      className={`relative border ${selectedIndex === index ? 'ring-2 ring-blue-500' : image.src === '' ? 'border-dotted border-black' : 'border-black'} ${isDragging ? 'opacity-50' : ''}`}
       onClick={() => onImageClick(index)}
       style={{ width: '300px', height: '225px' }} // Updated container size
     >
       <div className="absolute inset-0 flex items-center justify-center">
-        {image && image.src ? (
+        {image.src && image.src !== '' ? (
           <img 
             src={image.src} 
             alt={`Image ${index + 1}`} 
@@ -927,7 +1009,13 @@ AddImageButton.propTypes = {
 
 // PropTypes for ImageGrid component
 ImageGrid.propTypes = {
-  images: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.object])).isRequired,
+  images: PropTypes.arrayOf(PropTypes.shape({
+    src: PropTypes.string.isRequired,
+    width: PropTypes.number.isRequired,
+    height: PropTypes.number.isRequired,
+    x: PropTypes.number.isRequired,
+    y: PropTypes.number.isRequired,
+  })).isRequired,
   isStitched: PropTypes.bool.isRequired,
   selectedIndex: PropTypes.number,
   selectedAction: PropTypes.string,
@@ -937,7 +1025,6 @@ ImageGrid.propTypes = {
   onKeepBlank: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
   moveImage: PropTypes.func.isRequired,
-  logEvent: PropTypes.func.isRequired,
   tabIndex: PropTypes.number.isRequired,
   onContextMenu: PropTypes.func.isRequired,
   handleDownload: PropTypes.func.isRequired,
@@ -946,7 +1033,13 @@ ImageGrid.propTypes = {
 
 // PropTypes for ImageBox component
 ImageBox.propTypes = {
-  image: PropTypes.oneOfType([PropTypes.string, PropTypes.object]).isRequired,
+  image: PropTypes.shape({
+    src: PropTypes.string.isRequired,
+    width: PropTypes.number.isRequired,
+    height: PropTypes.number.isRequired,
+    x: PropTypes.number.isRequired,
+    y: PropTypes.number.isRequired,
+  }).isRequired,
   index: PropTypes.number.isRequired,
   isStitched: PropTypes.bool.isRequired,
   selectedIndex: PropTypes.number,
@@ -957,7 +1050,6 @@ ImageBox.propTypes = {
   onKeepBlank: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
   moveImage: PropTypes.func.isRequired,
-  logEvent: PropTypes.func.isRequired,
 };
 
 // PropTypes for StitchButton component
