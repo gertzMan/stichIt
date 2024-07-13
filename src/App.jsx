@@ -39,7 +39,6 @@ const ImageReplacerStitcher = () => {
   const [selectedAction, setSelectedAction] = useState(null);
   const actions = ['paste', 'load', 'blank', 'delete'];
 
-  const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // Add a new state to track if the "Add Image" button is focused
@@ -92,24 +91,37 @@ const ImageReplacerStitcher = () => {
   const handleStitch = (method = 'mouse') => {
     logEvent('ButtonPressed', { buttonText: 'Stitch', method });
 
+    // Create a new canvas element
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
     console.log(`Stitching started. Rows: ${rows}, Columns: ${columns}`);
 
-    // Calculate the dimensions of the stitched image
-    const totalWidth = columns * 300;
-    const totalHeight = rows * 225;
+    // Calculate the dimensions of each row and column
+    const rowHeights = Array(rows).fill(0);
+    const columnWidths = Array(columns).fill(0);
 
+    images.forEach((image, index) => {
+      const row = Math.floor(index / columns);
+      const col = index % columns;
+      if (image && image.height) {
+        rowHeights[row] = Math.max(rowHeights[row], image.height);
+      }
+      if (image && image.width) {
+        columnWidths[col] = Math.max(columnWidths[col], image.width);
+      }
+    });
+
+    const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+    const totalHeight = rowHeights.reduce((sum, height) => sum + height, 0);
+
+    // Set canvas dimensions
     canvas.width = totalWidth;
     canvas.height = totalHeight;
 
     console.log(`Canvas created with dimensions: ${totalWidth}x${totalHeight}`);
 
-    // Fill the entire canvas with white background
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, totalWidth, totalHeight);
-
+    // Function to draw an image on the canvas
     const drawImage = (img, x, y, width, height) => {
       return new Promise((resolve) => {
         img.onload = () => {
@@ -124,28 +136,32 @@ const ImageReplacerStitcher = () => {
       });
     };
 
+    // Function to stitch images together
     const stitchImages = async () => {
       try {
+        let yOffset = 0;
         for (let i = 0; i < rows; i++) {
+          let xOffset = 0;
           for (let j = 0; j < columns; j++) {
             const index = i * columns + j;
             const image = images[index];
             console.log(`Processing image at index ${index}:`, image);
-            const x = j * 300;
-            const y = i * 225;
-            
+
             if (image && image.src) {
               const img = new Image();
               img.src = image.src;
-              await drawImage(img, x, y, image.width, image.height);
+              await drawImage(img, xOffset, yOffset, image.width, image.height);
             } else {
-              console.log(`No image at index ${index}, leaving white background`);
+              console.log(`No image at index ${index}, leaving blank`);
             }
+
+            xOffset += columnWidths[j];
           }
+          yOffset += rowHeights[i];
         }
 
         const stitchedImageUrl = canvas.toDataURL();
-        console.log('Stitched image URL created');
+        console.log('Stitched image URL created:', stitchedImageUrl);
 
         const stitchedObject = {
           type: 'stitched',
@@ -550,25 +566,31 @@ const ImageReplacerStitcher = () => {
               tabIndex={3}
             />
           </div>
-          <ImageGrid 
-            images={images} 
-            rows={rows}
-            columns={columns}
-            isStitched={isStitched} 
-            selectedIndex={selectedIndex} 
-            selectedAction={selectedAction}
-            onImageClick={handleImageClick} 
-            onFileChange={handleFileChange}
-            onPasteButtonClick={handlePasteButtonClick}
-            onKeepBlank={handleKeepBlank}
-            onDelete={handleDelete}
-            moveImage={moveImage}
-            logEvent={logEvent}
-            tabIndex={1}
-            onContextMenu={handleContextMenu}
-            handleDownload={handleDownload}
-            handleCopyToClipboard={handleCopyToClipboard}
-          />
+          {isStitched ? (
+            <div className="flex justify-center">
+              <img src={images[0].url} alt="Stitched Image" />
+            </div>
+          ) : (
+            <ImageGrid 
+              images={images} 
+              rows={rows}
+              columns={columns}
+              isStitched={isStitched} 
+              selectedIndex={selectedIndex} 
+              selectedAction={selectedAction}
+              onImageClick={handleImageClick} 
+              onFileChange={handleFileChange}
+              onPasteButtonClick={handlePasteButtonClick}
+              onKeepBlank={handleKeepBlank}
+              onDelete={handleDelete}
+              moveImage={moveImage}
+              logEvent={logEvent}
+              tabIndex={1}
+              onContextMenu={handleContextMenu}
+              handleDownload={handleDownload}
+              handleCopyToClipboard={handleCopyToClipboard}
+            />
+          )}
           <StitchButton 
             isStitched={isStitched} 
             onClick={isStitched ? handleUnstitch : handleStitch} 
@@ -621,7 +643,6 @@ const ImageReplacerStitcher = () => {
             style={{ display: 'none' }} 
             onChange={(e) => handleFileChange(e, 'mouse')}
           />
-          <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
         </div>
       </div>
     </DndProvider>
