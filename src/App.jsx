@@ -23,10 +23,33 @@ const ItemType = {
 };
 
 // Define StitchedImageEditor component at the top of the file
-const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selectedIndex, zIndexOrder, setZIndexOrder }) => {
+const StitchedImageEditor = ({ stitchedImages, onDrag, onResize, selectedIndex, canvasWidth, canvasHeight }) => {
   const [draggingState, setDraggingState] = useState(null);
   const longPressTimeoutRef = useRef(null);
   const longPressDelay = 100; // milliseconds
+
+  // Function to scale images to fit within the canvas
+  const scaleImagesToFitCanvas = (images) => {
+    let maxWidth = 0;
+    let maxHeight = 0;
+
+    images.forEach(image => {
+      maxWidth = Math.max(maxWidth, image.width);
+      maxHeight = Math.max(maxHeight, image.height);
+    });
+
+    const widthScale = canvasWidth / maxWidth;
+    const heightScale = canvasHeight / maxHeight;
+    const scale = Math.min(widthScale, heightScale, 1); // Ensure scale is not greater than 1
+
+    return images.map(image => ({
+      ...image,
+      width: image.width * scale,
+      height: image.height * scale,
+    }));
+  };
+
+  const scaledImages = scaleImagesToFitCanvas(stitchedImages);
 
   const handleMouseDown = useCallback((index, e) => {
     const startX = e.clientX;
@@ -59,7 +82,6 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selec
     const handleMouseUp = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
-      handleDragEnd(index); // Update z-index order on drag end
       setDraggingState(null);
     };
 
@@ -83,13 +105,43 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selec
     };
   }, [stitchedImages, onDrag]);
 
-  const handleDragEnd = (index) => {
-    setZIndexOrder((prevOrder) => {
-      const newOrder = [...prevOrder];
-      const [movedImage] = newOrder.splice(index, 1);
-      newOrder.push(movedImage);
-      return newOrder;
-    });
+  const handleResizeMouseDown = (index, e) => {
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const originalWidth = stitchedImages[index].width;
+    const originalHeight = stitchedImages[index].height;
+    const originalX = stitchedImages[index].x;
+    const originalY = stitchedImages[index].y;
+
+    const handleMouseMove = (moveEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+
+      const aspectRatio = originalWidth / originalHeight;
+      let newWidth = originalWidth + dx;
+      let newHeight = originalHeight + dy;
+
+      if (newWidth / newHeight > aspectRatio) {
+        newWidth = newHeight * aspectRatio;
+      } else {
+        newHeight = newWidth / aspectRatio;
+      }
+
+      // Ensure the image stays within the canvas bounds
+      newWidth = Math.min(newWidth, canvasWidth - originalX);
+      newHeight = Math.min(newHeight, canvasHeight - originalY);
+
+      onResize(index, newWidth, newHeight, originalX, originalY);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
   };
 
   useEffect(() => {
@@ -104,34 +156,22 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selec
     return <div>No stitched images to display</div>;
   }
 
-  if (!canvasSize || canvasSize.width === 0 || canvasSize.height === 0) {
-    return <div>Invalid canvas size</div>;
-  }
-
-  // Calculate the scaling factor to fit images within 60% of the canvas width
-  const totalWidth = stitchedImages.reduce((sum, image) => sum + image.width, 0);
-  const actualCanvasWidth = totalWidth * 1.4;
-  const scaleFactor = canvasSize.width / actualCanvasWidth;
-
   return (
     <div className="overflow-auto" style={{ maxWidth: '100%', maxHeight: '80vh' }}>
       <div 
         className="relative border border-gray-300"
-        style={{ width: canvasSize.width, height: canvasSize.height, background: '#f0f0f0' }}
+        style={{ width: canvasWidth, height: canvasHeight, background: '#f0f0f0' }}
       >
-        {stitchedImages.map((image, index) => (
+        {scaledImages.map((image, index) => (
           <div
             key={index}
             data-index={index}
             style={{
               position: 'absolute',
-              left: image.x * scaleFactor,
-              top: image.y * scaleFactor,
+              left: image.x,
+              top: image.y,
               cursor: draggingState && draggingState.index === index ? 'grabbing' : 'grab',
               userSelect: 'none',
-              zIndex: zIndexOrder.length ? zIndexOrder.length - zIndexOrder.indexOf(image.src) : 1,
-              transform: `scale(${scaleFactor})`,
-              transformOrigin: 'top left',
             }}
             onMouseDown={(e) => handleMouseDown(index, e)}
           >
@@ -143,6 +183,18 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag, images, selec
                 height: image.height,
                 pointerEvents: 'none',
               }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: '10px',
+                height: '10px',
+                backgroundColor: 'blue',
+                cursor: 'nwse-resize',
+              }}
+              onMouseDown={(e) => handleResizeMouseDown(index, e)}
             />
           </div>
         ))}
@@ -162,23 +214,11 @@ StitchedImageEditor.propTypes = {
       y: PropTypes.number.isRequired,
     })
   ).isRequired,
-  canvasSize: PropTypes.shape({
-    width: PropTypes.number.isRequired,
-    height: PropTypes.number.isRequired,
-  }).isRequired,
   onDrag: PropTypes.func.isRequired,
-  images: PropTypes.arrayOf(
-    PropTypes.shape({
-      src: PropTypes.string.isRequired,
-      width: PropTypes.number.isRequired,
-      height: PropTypes.number.isRequired,
-      x: PropTypes.number.isRequired,
-      y: PropTypes.number.isRequired,
-    })
-  ).isRequired,
+  onResize: PropTypes.func.isRequired,
   selectedIndex: PropTypes.number,
-  zIndexOrder: PropTypes.arrayOf(PropTypes.string).isRequired,
-  setZIndexOrder: PropTypes.func.isRequired,
+  canvasWidth: PropTypes.number.isRequired,
+  canvasHeight: PropTypes.number.isRequired,
 };
 
 class ErrorBoundary extends React.Component {
@@ -238,9 +278,6 @@ const ImageReplacerStitcher = () => {
   const [stitchedImages, setStitchedImages] = useState([]);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
-  // New state to track z-index order
-  const [zIndexOrder, setZIndexOrder] = useState([]);
-
   // Function to add a new image
   const handleAddImage = (method = 'mouse') => {
     setImages(prevImages => [
@@ -258,27 +295,9 @@ const ImageReplacerStitcher = () => {
 
   // Function to stitch images together into a single image
   const handleStitch = (method = 'mouse') => {
-    // Calculate the total width and maximum height of all images
-    const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
-    const maxHeight = Math.max(...images.map(image => image.height || 225));
-
-    // Calculate the actual canvas width (total width of all images + 40%)
-    const actualCanvasWidth = totalWidth * 1.4;
-
-    // Get the available viewport width
-    const viewportWidth = window.innerWidth;
-
-    // Set the displayed canvas width to the viewport width
-    const displayedCanvasWidth = viewportWidth;
-
-    // Calculate the scaling factor to fit the actual canvas width into the displayed canvas width
-    const scaleFactor = displayedCanvasWidth / actualCanvasWidth;
-
-    // Set the canvas size
-    setCanvasSize({ 
-      width: displayedCanvasWidth,
-      height: maxHeight * scaleFactor // Scale the height proportionally
-    });
+    // Calculate the total width and height of all images
+    const totalWidth = images.reduce((sum, image) => sum + image.width, 0);
+    const totalHeight = Math.max(...images.map(image => image.height));
 
     // Prepare stitched images data
     let xOffset = 0;
@@ -295,8 +314,8 @@ const ImageReplacerStitcher = () => {
     });
 
     setStitchedImages(stitchedImagesData);
+    setCanvasSize({ width: totalWidth, height: totalHeight });
     setIsStitched(true);
-    setZIndexOrder(images.map(img => img.src)); // Initialize zIndexOrder
   };
 
   // Function to unstitch images
@@ -439,17 +458,13 @@ const ImageReplacerStitcher = () => {
     });
   };
 
-  // Function to move an image box and update z-index
+  // Function to move an image box
   const moveImage = (dragIndex, hoverIndex) => {
     const dragImage = images[dragIndex];
     const newImages = [...images];
     newImages.splice(dragIndex, 1);
     newImages.splice(hoverIndex, 0, dragImage);
     setImages(newImages);
-    
-    // Update z-index order
-    const newZIndexOrder = newImages.map(img => img.src);
-    setZIndexOrder(newZIndexOrder);
   };
 
   // Effect to reset selected index when images change
@@ -458,122 +473,6 @@ const ImageReplacerStitcher = () => {
       setSelectedIndex(null);
     }
   }, [images]);
-
-  // Updated handleKeyDown function
-  const handleKeyDown = useCallback((e) => {
-    if (images.length === 0) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        handleAddImage('keyboard');
-      }
-      return;
-    }
-
-    switch (e.key) {
-      case 'ArrowLeft':
-      case 'ArrowRight':
-        setSelectedIndex((prevIndex) => {
-          let newIndex;
-          if (e.key === 'ArrowLeft') {
-            newIndex = prevIndex === null ? images.length - 1 : (prevIndex > 0 ? prevIndex - 1 : prevIndex);
-          } else { // ArrowRight
-            newIndex = prevIndex === null ? 0 : (prevIndex < images.length - 1 ? prevIndex + 1 : prevIndex);
-          }
-          return newIndex;
-        });
-        setSelectedAction(null);
-        break;
-      case 'ArrowUp':
-      case 'ArrowDown':
-        if (selectedIndex !== null) {
-          setSelectedAction((prevAction) => {
-            const currentIndex = prevAction === null ? -1 : actions.indexOf(prevAction);
-            const newIndex = e.key === 'ArrowUp' 
-              ? (currentIndex - 1 + actions.length) % actions.length
-              : (currentIndex + 1) % actions.length;
-            return actions[newIndex];
-          });
-        }
-        break;
-      case 'Enter':
-      case ' ': // Space key
-        e.preventDefault();
-        if (selectedIndex !== null) {
-          if (selectedAction !== null) {
-            switch (selectedAction) {
-              case 'paste':
-                handlePasteButtonClick('keyboard');
-                break;
-              case 'load':
-                fileInputRef.current.click();
-                break;
-              case 'blank':
-                handleKeepBlank('keyboard');
-                break;
-              case 'delete':
-                handleDelete(selectedIndex, 'keyboard');
-                break;
-            }
-            setSelectedAction(null);
-          } else if (selectedIndex === images.length - 1 && !isStitched) {
-            handleAddImage('keyboard');
-          }
-        }
-        break;
-      case 'Delete':
-        if (selectedIndex !== null) {
-          handleDelete(selectedIndex, 'keyboard');
-        }
-        break;
-      case 'v':
-        if (e.ctrlKey || e.metaKey) {
-          if (selectedIndex !== null) {
-            handlePasteButtonClick('keyboard');
-          } else if (images.length > 0) {
-            setSelectedIndex(0);
-            handlePasteButtonClick('keyboard');
-          }
-        }
-        break;
-      case 'u':
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
-          if (selectedIndex !== null) {
-            fileInputRef.current.click();
-          } else if (images.length > 0) {
-            setSelectedIndex(0);
-            fileInputRef.current.click();
-          }
-        }
-        break;
-      case 'i':
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
-          if (isStitched) {
-            handleUnstitch('keyboard');
-          } else if (images.length >= 2) {
-            handleStitch('keyboard');
-          }
-        }
-        break;
-      case 'a':
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
-          e.preventDefault();
-          if (!isStitched) {
-            handleAddImage('keyboard');
-          }
-        }
-        break;
-      default:
-        break;
-    }
-  }, [selectedIndex, selectedAction, images, handleDelete, handlePasteButtonClick, handleKeepBlank, isStitched, handleStitch, handleUnstitch, handleAddImage]);
-
-  // Add event listener for keydown events
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleKeyDown]);
 
   const handleContextMenu = (e) => {
     e.preventDefault();
@@ -639,26 +538,37 @@ const ImageReplacerStitcher = () => {
 
   // Add a function to handle image dragging
   const handleDrag = (index, e, data) => {
-    const newStitchedImages = [...stitchedImages];
-    const image = newStitchedImages[index];
-    
-    // Calculate boundaries
-    const maxX = canvasSize.width - image.width;
-    const maxY = canvasSize.height - image.height;
+    setStitchedImages(prevImages => {
+      const newImages = [...prevImages];
+      const image = newImages[index];
+      
+      // Constrain x and y within the canvas
+      const newX = Math.max(0, Math.min(data.x, canvasSize.width - image.width));
+      const newY = Math.max(0, Math.min(data.y, canvasSize.height - image.height));
 
-    // Constrain x and y within the canvas
-    const newX = Math.max(0, Math.min(data.x, maxX));
-    const newY = Math.max(0, Math.min(data.y, maxY));
+      newImages[index] = {
+        ...image,
+        x: newX,
+        y: newY,
+      };
 
-    newStitchedImages[index] = {
-      ...image,
-      x: newX,
-      y: newY,
-      width: image.width,
-      height: image.height,
-    };
+      return newImages;
+    });
+  };
 
-    setStitchedImages(newStitchedImages);
+  // Add a function to handle image resizing
+  const handleResize = (index, newWidth, newHeight, originalX, originalY) => {
+    setStitchedImages(prevImages => {
+      const newImages = [...prevImages];
+      newImages[index] = {
+        ...newImages[index],
+        width: newWidth,
+        height: newHeight,
+        x: originalX,
+        y: originalY,
+      };
+      return newImages;
+    });
   };
 
   // Add a condition to disable the "Add Image" button if there's already an empty box in the grid
@@ -686,10 +596,9 @@ const ImageReplacerStitcher = () => {
     setStitchedImageUrl(null);
     setSelectedAction(null);
     setStitchedImages([]);
-    setCanvasSize({ width: 0, height: 0 });
     setIsAddImageFocused(false);
     setContextMenu({ visible: false, x: 0, y: 0 });
-    setZIndexOrder([]);
+    setCanvasSize({ width: 0, height: 0 });
   };
 
   // Call the initialize function at the start of the component
@@ -700,7 +609,7 @@ const ImageReplacerStitcher = () => {
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col min-h-screen">
-        <div className="flex-grow p-4 max-w-2xl mx-auto" onPaste={handlePaste}>
+        <div className="flex-grow p-4 mx-auto" style={{ maxWidth: '800px' }} onPaste={handlePaste}>
           <div className="flex justify-between mb-4">
             <AddImageButton 
               onClick={handleAddImage} 
@@ -715,12 +624,11 @@ const ImageReplacerStitcher = () => {
           {isStitched ? (
             <StitchedImageEditor
               stitchedImages={stitchedImages}
-              canvasSize={canvasSize}
               onDrag={handleDrag}
-              images={images}
+              onResize={handleResize}
               selectedIndex={selectedIndex}
-              zIndexOrder={zIndexOrder}
-              setZIndexOrder={setZIndexOrder}
+              canvasWidth={canvasSize.width}
+              canvasHeight={canvasSize.height}
             />
           ) : (
             <ImageGrid 
@@ -752,7 +660,6 @@ const ImageReplacerStitcher = () => {
               <p>{calculateGridDimensions()}</p>
             </div>
           </div>
-          <KeyboardUsageGuide />
           <div className="mt-4">
             <h2 className="text-lg font-bold mb-2">Image Grid Data</h2>
             <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${images.length}, 50px)`, gridAutoRows: '50px' }}>
@@ -795,54 +702,6 @@ const ImageReplacerStitcher = () => {
     </DndProvider>
   );
 };
-
-// Component to display keyboard usage guide
-const KeyLogo = ({ children }) => (
-  <span className="inline-block bg-gray-200 rounded px-2 py-1 text-xs font-semibold mr-2">{children}</span>
-);
-
-const KeyboardUsageGuide = () => (
-  <div className="mt-4 text-sm text-gray-600">
-    <h2 className="text-lg font-bold mb-4">Keyboard Shortcuts</h2>
-    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-      <div className="flex items-center">
-        <KeyLogo>←</KeyLogo> <span>Select previous image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>→</KeyLogo> <span>Select next image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo></KeyLogo> <span>Select previous action in image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>↓</KeyLogo> <span>Select next action in image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>Enter</KeyLogo>/<KeyLogo>Space</KeyLogo>
-        <span>Perform selected action</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>Delete</KeyLogo> <span>Delete selected image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>Ctrl</KeyLogo>+<KeyLogo>V</KeyLogo>
-        <span>Paste image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>Ctrl</KeyLogo>+<KeyLogo>Shift</KeyLogo>+<KeyLogo>U</KeyLogo>
-        <span>Upload image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>Ctrl</KeyLogo>+<KeyLogo>Shift</KeyLogo>+<KeyLogo>A</KeyLogo>
-        <span>Add new image</span>
-      </div>
-      <div className="flex items-center">
-        <KeyLogo>Ctrl</KeyLogo>+<KeyLogo>Shift</KeyLogo>+<KeyLogo>I</KeyLogo>
-        <span>Stitch/Unstitch</span>
-      </div>
-    </div>
-  </div>
-);
 
 // Component for the "Add Image" button
 const AddImageButton = ({ onClick, isDisabled, isFocused, tabIndex }) => (
