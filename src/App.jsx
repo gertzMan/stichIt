@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { Image as ImageIcon, Scissors, Plus, Clipboard, Upload, XCircle, Trash2, ArrowLeft, ArrowRight, Delete, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import Draggable from 'react-draggable';
 
 /**
  * @typedef {Object} StitchedImage
@@ -22,7 +23,94 @@ const ItemType = {
   IMAGE: 'image',
 };
 
+// Define StitchedImageEditor component at the top of the file
+const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag }) => {
+  console.log("Rendering StitchedImageEditor");
+  console.log("stitchedImages:", stitchedImages);
+  console.log("canvasSize:", canvasSize);
+
+  if (!stitchedImages || stitchedImages.length === 0) {
+    return <div>No stitched images to display</div>;
+  }
+
+  if (!canvasSize || canvasSize.width === 0 || canvasSize.height === 0) {
+    return <div>Invalid canvas size</div>;
+  }
+
+  return (
+    <div className="overflow-auto" style={{ maxWidth: '100%', maxHeight: '80vh' }}>
+      <div 
+        className="relative border border-gray-300"
+        style={{ width: canvasSize.width, height: canvasSize.height, background: '#f0f0f0' }}
+      >
+        {stitchedImages.map((image, index) => (
+          <Draggable
+            key={index}
+            defaultPosition={{ x: image.x, y: image.y }}
+            bounds="parent"
+            onDrag={(e, data) => onDrag(index, e, data)}
+          >
+            <img
+              src={image.src}
+              alt={`Stitched Image ${index + 1}`}
+              style={{
+                width: image.width,
+                height: image.height,
+                position: 'absolute',
+                cursor: 'move',
+              }}
+            />
+          </Draggable>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Add PropTypes for the StitchedImageEditor component
+StitchedImageEditor.propTypes = {
+  stitchedImages: PropTypes.arrayOf(
+    PropTypes.shape({
+      src: PropTypes.string.isRequired,
+      width: PropTypes.number.isRequired,
+      height: PropTypes.number.isRequired,
+      x: PropTypes.number.isRequired,
+      y: PropTypes.number.isRequired,
+    })
+  ).isRequired,
+  canvasSize: PropTypes.shape({
+    width: PropTypes.number.isRequired,
+    height: PropTypes.number.isRequired,
+  }).isRequired,
+  onDrag: PropTypes.func.isRequired,
+};
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Error caught by boundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <h1>Something went wrong.</h1>;
+    }
+
+    return this.props.children;
+  }
+}
+
 const ImageReplacerStitcher = () => {
+  console.log("Rendering ImageReplacerStitcher");
+  
   // State to hold the list of images, initialized with one empty image box
   const [images, setImages] = useState(/** @type {ImageType[]} */(['']));
   // State to track if images are stitched together
@@ -45,6 +133,9 @@ const ImageReplacerStitcher = () => {
   // State to manage context menu visibility and position
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
 
+  const [stitchedImages, setStitchedImages] = useState([]);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
   const logEvent = (eventType, details, method = 'mouse') => {
     const eventLog = {
       eventType,
@@ -66,100 +157,38 @@ const ImageReplacerStitcher = () => {
   const handleStitch = (method = 'mouse') => {
     logEvent('ButtonPressed', { buttonText: 'Stitch', method });
 
-    // Create a new canvas element
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    console.log(`Stitching started. Images: ${images.length}`);
-
     // Calculate the total width and height
     const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
     const maxHeight = Math.max(...images.map(image => image.height || 225));
 
-    // Set canvas dimensions
-    canvas.width = totalWidth;
-    canvas.height = maxHeight;
+    // Double the canvas size
+    setCanvasSize({ width: totalWidth * 2, height: maxHeight * 2 });
 
-    console.log(`Canvas created with dimensions: ${totalWidth}x${maxHeight}`);
+    // Prepare stitched images data
+    let xOffset = 0;
+    const stitchedImagesData = images.map((image, index) => {
+      const imageData = {
+        src: image.src,
+        width: image.width || 300,
+        height: image.height || 225,
+        x: xOffset,
+        y: 0, // Start at the top
+      };
+      xOffset += imageData.width;
+      return imageData;
+    });
 
-    // Function to draw an image on the canvas
-    const drawImage = (img, x, y, width, height) => {
-      return new Promise((resolve) => {
-        img.onload = () => {
-          ctx.drawImage(img, x, y, width, height);
-          console.log(`Image drawn at (${x}, ${y}) with dimensions ${width}x${height}`);
-          resolve();
-        };
-        img.onerror = (error) => {
-          console.error('Error loading image:', error);
-          resolve(); // Resolve even on error to continue stitching
-        };
-      });
-    };
-
-    // Function to stitch images together
-    const stitchImages = async () => {
-      try {
-        let xOffset = 0;
-        for (let i = 0; i < images.length; i++) {
-          const image = images[i];
-          console.log(`Processing image at index ${i}:`, image);
-
-          if (image && image.src) {
-            const img = new Image();
-            img.src = image.src;
-
-            // Adjust the image dimensions to fit the canvas
-            const aspectRatio = image.width / image.height;
-            const newWidth = image.width;
-            const newHeight = newWidth / aspectRatio;
-
-            await drawImage(img, xOffset, 0, newWidth, newHeight);
-          } else {
-            console.log(`No image at index ${i}, leaving blank`);
-          }
-          xOffset += image.width || 300;
-        }
-
-        const stitchedImageUrl = canvas.toDataURL();
-        console.log('Stitched image URL created:', stitchedImageUrl);
-
-        const stitchedObject = {
-          type: 'stitched',
-          url: stitchedImageUrl,
-          originalImages: [...images],
-          width: canvas.width,
-          height: canvas.height
-        };
-
-        console.log('Stitched object created:', stitchedObject);
-
-        logEvent('ImagesStitched', { message: 'Images stitched', images, method });
-        setOriginalImages(images);
-        setImages([stitchedObject]);
-        console.log('Images state after stitching:', images);
-        setIsStitched(true);
-
-        console.log('Stitching completed successfully');
-      } catch (error) {
-        console.error('Error during stitching:', error);
-        // Handle the error appropriately
-      }
-    };
-
-    stitchImages();
+    setStitchedImages(stitchedImagesData);
+    setIsStitched(true);
+    logEvent('ImagesStitched', { message: 'Images stitched', images, method });
   };
 
   // Function to unstitch images
   const handleUnstitch = (method = 'mouse') => {
     logEvent('ButtonPressed', { buttonText: 'Unstitch', method });
-    if (images[0] && images[0].type === 'stitched') {
-      setImages(images[0].originalImages);
-    } else {
-      setImages(originalImages);
-    }
+    setStitchedImages([]);
     setIsStitched(false);
-    logEvent('ImagesUnstitched', { originalImages, method });
+    logEvent('ImagesUnstitched', { originalImages: images, method });
   };
 
   // Function to handle image box click
@@ -490,10 +519,26 @@ const ImageReplacerStitcher = () => {
     });
   };
 
+  // Add a function to handle image dragging
+  const handleDrag = (index, e, data) => {
+    const newStitchedImages = [...stitchedImages];
+    newStitchedImages[index] = {
+      ...newStitchedImages[index],
+      x: data.x,
+      y: data.y,
+    };
+    setStitchedImages(newStitchedImages);
+  };
+
+  console.log("isStitched:", isStitched);
+  console.log("stitchedImages:", stitchedImages);
+  console.log("canvasSize:", canvasSize);
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col min-h-screen">
         <div className="flex-grow p-4 max-w-2xl mx-auto" onPaste={handlePaste}>
+          {console.log("Rendering main content")}
           <div className="flex justify-between mb-4">
             <AddImageButton 
               onClick={handleAddImage} 
@@ -503,9 +548,11 @@ const ImageReplacerStitcher = () => {
             />
           </div>
           {isStitched ? (
-            <div className="flex justify-center">
-              <img src={images[0].url} alt="Stitched Image" />
-            </div>
+            <StitchedImageEditor
+              stitchedImages={stitchedImages}
+              canvasSize={canvasSize}
+              onDrag={handleDrag}
+            />
           ) : (
             <ImageGrid 
               images={images}
