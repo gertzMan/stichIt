@@ -113,22 +113,36 @@ const StitchedImageEditor = ({ stitchedImages, onDrag, onResize, selectedIndex, 
     const originalHeight = stitchedImages[index].height;
     const originalX = stitchedImages[index].x;
     const originalY = stitchedImages[index].y;
+    const aspectRatio = originalWidth / originalHeight;
 
     const handleMouseMove = (moveEvent) => {
       const dx = moveEvent.clientX - startX;
       const dy = moveEvent.clientY - startY;
 
-      const aspectRatio = originalWidth / originalHeight;
+      // Calculate new dimensions while maintaining aspect ratio
       let newWidth = originalWidth + dx;
-      let newHeight = originalHeight + dy;
+      let newHeight = newWidth / aspectRatio;
 
-      if (newWidth / newHeight > aspectRatio) {
-        newWidth = newHeight * aspectRatio;
-      } else {
+      // Check if we're hitting the right or bottom boundary
+      const isHittingRightBoundary = originalX + newWidth > canvasWidth;
+      const isHittingBottomBoundary = originalY + newHeight > canvasHeight;
+
+      // Adjust dimensions if hitting boundaries
+      if (isHittingRightBoundary) {
+        newWidth = canvasWidth - originalX;
         newHeight = newWidth / aspectRatio;
       }
+      if (isHittingBottomBoundary) {
+        newHeight = canvasHeight - originalY;
+        newWidth = newHeight * aspectRatio;
+      }
 
-      // Ensure the image stays within the canvas bounds
+      // Ensure we're not making the image smaller than a minimum size (e.g., 20x20 pixels)
+      const minSize = 20;
+      newWidth = Math.max(newWidth, minSize);
+      newHeight = Math.max(newHeight, minSize);
+
+      // Final boundary check
       newWidth = Math.min(newWidth, canvasWidth - originalX);
       newHeight = Math.min(newHeight, canvasHeight - originalY);
 
