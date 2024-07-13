@@ -3,7 +3,6 @@ import PropTypes from 'prop-types';
 import { Image as ImageIcon, Scissors, Plus, Clipboard, Upload, XCircle, Trash2, ArrowLeft, ArrowRight, Delete, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import Draggable from 'react-draggable';
 
 /**
  * @typedef {Object} StitchedImage
@@ -29,6 +28,61 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag }) => {
   console.log("stitchedImages:", stitchedImages);
   console.log("canvasSize:", canvasSize);
 
+  const [draggingState, setDraggingState] = useState(null);
+  const longPressDelay = 300; // milliseconds
+
+  const handleMouseDown = useCallback((index, e) => {
+    const startTime = new Date().getTime();
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    const timer = setTimeout(() => {
+      setDraggingState({
+        index,
+        startX,
+        startY,
+        originalX: stitchedImages[index].x,
+        originalY: stitchedImages[index].y,
+      });
+    }, longPressDelay);
+
+    const handleMouseUp = () => {
+      clearTimeout(timer);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [stitchedImages]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (draggingState) {
+      const dx = e.clientX - draggingState.startX;
+      const dy = e.clientY - draggingState.startY;
+      onDrag(draggingState.index, null, {
+        x: draggingState.originalX + dx,
+        y: draggingState.originalY + dy,
+      });
+    }
+  }, [draggingState, onDrag]);
+
+  const handleMouseUp = useCallback(() => {
+    setDraggingState(null);
+  }, []);
+
+  useEffect(() => {
+    if (draggingState) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    } else {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingState, handleMouseMove, handleMouseUp]);
+
   if (!stitchedImages || stitchedImages.length === 0) {
     return <div>No stitched images to display</div>;
   }
@@ -44,11 +98,16 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag }) => {
         style={{ width: canvasSize.width, height: canvasSize.height, background: '#f0f0f0' }}
       >
         {stitchedImages.map((image, index) => (
-          <Draggable
+          <div
             key={index}
-            defaultPosition={{ x: image.x, y: image.y }}
-            bounds="parent"
-            onDrag={(e, data) => onDrag(index, e, data)}
+            style={{
+              position: 'absolute',
+              left: image.x,
+              top: image.y,
+              cursor: draggingState && draggingState.index === index ? 'grabbing' : 'grab',
+              userSelect: 'none',
+            }}
+            onMouseDown={(e) => handleMouseDown(index, e)}
           >
             <img
               src={image.src}
@@ -56,11 +115,10 @@ const StitchedImageEditor = ({ stitchedImages, canvasSize, onDrag }) => {
               style={{
                 width: image.width,
                 height: image.height,
-                position: 'absolute',
-                cursor: 'move',
+                pointerEvents: 'none',
               }}
             />
-          </Draggable>
+          </div>
         ))}
       </div>
     </div>
@@ -157,24 +215,37 @@ const ImageReplacerStitcher = () => {
   const handleStitch = (method = 'mouse') => {
     logEvent('ButtonPressed', { buttonText: 'Stitch', method });
 
-    // Calculate the total width and height
+    // Calculate the total width and maximum height of all images
     const totalWidth = images.reduce((sum, image) => sum + (image.width || 300), 0);
     const maxHeight = Math.max(...images.map(image => image.height || 225));
 
-    // Double the canvas size
-    setCanvasSize({ width: totalWidth * 2, height: maxHeight * 2 });
+    // Calculate the maximum width that doesn't require scrolling
+    const maxScrollWidth = window.innerWidth - 40; // Subtracting 40px for some padding
+
+    // Determine the canvas width (minimum of totalWidth and maxScrollWidth)
+    const canvasWidth = Math.min(totalWidth, maxScrollWidth);
+
+    // Calculate the scale factor
+    const scaleFactor = canvasWidth / totalWidth;
+
+    setCanvasSize({ 
+      width: Math.round(canvasWidth),
+      height: Math.round(maxHeight * scaleFactor * 2) // Double the height for more vertical space
+    });
 
     // Prepare stitched images data
     let xOffset = 0;
     const stitchedImagesData = images.map((image, index) => {
+      const scaledWidth = Math.round((image.width || 300) * scaleFactor);
+      const scaledHeight = Math.round((image.height || 225) * scaleFactor);
       const imageData = {
         src: image.src,
-        width: image.width || 300,
-        height: image.height || 225,
+        width: scaledWidth,
+        height: scaledHeight,
         x: xOffset,
         y: 0, // Start at the top
       };
-      xOffset += imageData.width;
+      xOffset += scaledWidth;
       return imageData;
     });
 
